@@ -36,6 +36,8 @@ from torch.autograd import Variable
 
 __all__ = ['ResNet', 'resnet20', 'resnet32']
 
+# Need to get to return penultimate layer too
+
 def _weights_init(m):
     classname = m.__class__.__name__
     #print(classname)
@@ -113,9 +115,13 @@ class ResNet(nn.Module):
         out = self.layer3(out)
         out = F.avg_pool2d(out, out.size()[3])
         out = out.view(out.size(0), -1)
+        
+        # Remove this
         out = self.linear(out)
-        return out
 
+        #replace with new bit in return section
+        return out
+        #return self.linear(out), out
 
 def resnet20():
     return ResNet(BasicBlock, [3, 3, 3])

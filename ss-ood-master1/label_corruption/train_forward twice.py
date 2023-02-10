@@ -17,7 +17,7 @@ from load_corrupted_data import CIFAR10, CIFAR100
 from PIL import Image
 import torch.nn as nn
 
-
+# Line 283 is where I stopped
 # note: nosgdr, schedule, and epochs are highly related settings
 # Line 155 can be changed to try training on resnet20
 
@@ -156,6 +156,9 @@ test_loader = torch.utils.data.DataLoader(test_data, batch_size=args.test_bs, sh
 net = resnet20()
 net.rot_pred = nn.Linear(64, 4) # change first entry to 64 for resnet20 layer, 128 for wide resnet
 
+net2 = resnet20()
+net2.rot_pred = nn.Linear(64, 4) # change first entry to 64 for resnet20 layer, 128 for wide resnet
+
 start_epoch = 0
 
 # Restore model if desired
@@ -184,12 +187,15 @@ optimizer = torch.optim.SGD(
     net.parameters(), state['learning_rate'], momentum=state['momentum'],
     weight_decay=state['decay'], nesterov=True)
 
+optimizer2 = torch.optim.SGD(
+    net2.parameters(), state['learning_rate'], momentum=state['momentum'],
+    weight_decay=state['decay'], nesterov=True)
 
 def cosine_annealing(step, total_steps, lr_max, lr_min):
     return lr_min + (lr_max - lr_min) * 0.5 * (
             1 + np.cos(step / total_steps * np.pi))
 
-
+# Might need to do scheduler for the second model too?
 scheduler = torch.optim.lr_scheduler.LambdaLR(
     optimizer,
     lr_lambda=lambda step: cosine_annealing(
@@ -213,7 +219,7 @@ loss_kl = nn.KLDivLoss(reduction='batchmean')
 # This performs a training step, need it to call both models in here
 def train(no_correction=True, C_hat_transpose=None, scheduler=scheduler):
     net.train()     # enter train mode # what does that mean?
-    #net.train2() # Maybe?
+    net.train2() 
     loss_avg = 0.0
     for bx, by in train_loader:
         bx, by = bx.cuda(), by.cuda()
@@ -221,18 +227,24 @@ def train(no_correction=True, C_hat_transpose=None, scheduler=scheduler):
         #for model in models: (indent stuff below)
         # forward
         logits, _ = net(bx * 2 - 1) # change 'net' to 'models'? could also leave it as kind of scrappy code and manually write 'net' and 'nets'
-        #logits2 = net2(bx * 2 - 1)
+        logits2 = net2(bx * 2 - 1)
 
         # backward
-        # kl_loss = 0
+        kl_loss = 0
+        kl_loss2 = 0
         optimizer.zero_grad()
         scheduler.step()
         if no_correction:
             loss = F.cross_entropy(logits, by)
+            loss2 = F.cross_entropy(logits2, by)
         else:
             pre1 = C_hat_transpose[torch.cuda.LongTensor(by.data)]
             pre2 = torch.mul(F.softmax(logits), pre1)
             loss = -(torch.log(pre2.sum(1))).mean()
+
+            pre22 = torch.mul(F.softmax(logits2), pre1)
+            loss2 = -(torch.log(pre22.sum(1))).mean()
+            
         if not args.no_ss:
             curr_batch_size = bx.size(0)
             by_prime = torch.cat((torch.zeros(bx.size(0)), torch.ones(bx.size(0)),
@@ -246,22 +258,29 @@ def train(no_correction=True, C_hat_transpose=None, scheduler=scheduler):
             _, pen = net(bx * 2 - 1)
 
             loss += 0.5 * F.cross_entropy(net.rot_pred(pen), by_prime)
+            loss2 += 0.5 * F.cross_entropy(net2.rot_pred(pen), by_prime)
 
-            # For j in range (model_num): # 2 for our case
-                #if i! = j:
-                    #kl_loss += self.loss_kl(F.log_softmax(outputs[i], dim = 1), 
-                    # F.softmax(Variable(outputs[j]), dim=1))
-            # loss += kl_loss/(model_num -1) #instead of model_num could start by just having it for two models explictly stated
+
+            # KL loss, 
+            kl_loss += loss_kl(F.log_softmax(net.rot_pred(pen),dim = 1), F.log_softmax(net2.rot_pred(pen),dim = 1))
+            loss += kl_loss 
+            
+            kl_loss2 += loss_kl(F.log_softmax(net2.rot_pred(pen),dim = 1), F.log_softmax(net.rot_pred(pen),dim = 1))
+            loss2 += kl_loss 
 
 
         loss.backward()
         optimizer.step() # Ignore warning, this is the right order        
+
+        loss2.backward()
+        optimizer2.step() # Ignore warning, this is the right order        
 
         # exponential moving average
         loss_avg = loss_avg * 0.95 + loss.item() * 0.05
 
     state['train_loss'] = loss_avg
 
+# Now to TEST
 
 # test function (forward only)
 def test():
