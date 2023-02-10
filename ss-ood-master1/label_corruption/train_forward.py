@@ -11,6 +11,7 @@ import torch.nn.functional as F
 import torchvision.datasets as dset
 import torchvision.transforms as transforms
 from models.wrn_with_pen import WideResNet
+from models.resnet import resnet20
 import numpy as np
 from load_corrupted_data import CIFAR10, CIFAR100
 from PIL import Image
@@ -18,6 +19,7 @@ import torch.nn as nn
 
 
 # note: nosgdr, schedule, and epochs are highly related settings
+# Line 155 can be changed to try training on resnet20
 
 parser = argparse.ArgumentParser(description='Trains WideResNet on CIFAR',
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -27,7 +29,7 @@ parser.add_argument('--data_path', type=str, default='./data/cifarpy',
 parser.add_argument('--dataset', type=str, default='cifar10', choices=['cifar10', 'cifar100'],
     help='Choose between CIFAR-10, CIFAR-100.')
 # Optimization options
-parser.add_argument('--epochs', '-e', type=int, default=100, help='Number of epochs to train.')
+parser.add_argument('--epochs', '-e', type=int, default=2, help='Number of epochs to train.') # Changed to 2 to see whole thing, default 100
 parser.add_argument('--batch_size', '-b', type=int, default=128, help='Batch size.')
 parser.add_argument('--gold_fraction', '-gf', type=float, default=0, help='What fraction of the data should be trusted?')
 parser.add_argument('--corruption_prob', '-cprob', type=float, default=0.3, help='The label corruption probability.')
@@ -148,9 +150,11 @@ test_loader = torch.utils.data.DataLoader(test_data, batch_size=args.test_bs, sh
                                           num_workers=args.prefetch, pin_memory=True)
 
 
-# Create model
+# Create 
+# Think I should be able to swap this straight for Resnet 20, let me check it out
 net = WideResNet(args.layers, num_classes, args.widen_factor, dropRate=args.droprate)
-net.rot_pred = nn.Linear(128, 4)
+# net = resnet20
+net.rot_pred = nn.Linear(128, 4) # change first entry to size of penultimate resnet20 layer, 128 for wide resnet
 
 start_epoch = 0
 
@@ -195,19 +199,32 @@ scheduler = torch.optim.lr_scheduler.LambdaLR(
         1e-6 / args.learning_rate))
 
 
+# Need a for loop in the training
+#  for i in range(self.model_num):
+#            # build models
+#            model = resnet20()
+#            if self.use_gpu:
+#                model.cuda()           
+#            self.models.append(model)
 
+# Define KL loss for later
+loss_kl = nn.KLDivLoss(reduction='batchmean')
 # train function (forward, backward, update)
+# This performs a training step, need it to call both models in here
 def train(no_correction=True, C_hat_transpose=None, scheduler=scheduler):
-    net.train()     # enter train mode
+    net.train()     # enter train mode # what does that mean?
+    #net.train2() ?
     loss_avg = 0.0
     for bx, by in train_loader:
         bx, by = bx.cuda(), by.cuda()
 
+        # for model in models: (indent stuff below)
         # forward
         logits, _ = net(bx * 2 - 1)
+        #logits2 = net2(bx * 2 - 1)
 
         # backward
-
+        # kl_loss = 0
         optimizer.zero_grad()
         optimizer.step()
         if no_correction:
@@ -229,6 +246,14 @@ def train(no_correction=True, C_hat_transpose=None, scheduler=scheduler):
             _, pen = net(bx * 2 - 1)
 
             loss += 0.5 * F.cross_entropy(net.rot_pred(pen), by_prime)
+
+            # For j in range (model_num): # 2 for our case
+                #if i! = j:
+                    #kl_loss += self.loss_kl(F.log_softmax(outputs[i], dim = 1), 
+                    # F.softmax(Variable(outputs[j]), dim=1))
+            # loss += kl_loss/(model_num -1)
+
+
         loss.backward()
         scheduler.step() # swapped positions with optimiser.step        
 
@@ -248,7 +273,7 @@ def test():
         bx, by = bx.cuda(), by.cuda()
 
         # forward
-        logits, pen = net(bx * 2 - 1)
+        logits, pen = net(bx * 2 - 1) # Does the -1 mean look at the penultimate layer? Or is it just the ','
         loss = F.cross_entropy(logits, by)
 
         # accuracy
@@ -268,7 +293,7 @@ for epoch in range(args.epochs):
     state['epoch'] = epoch
 
     begin_epoch = time.time()
-    train(scheduler=scheduler)
+    train(scheduler=scheduler) 
     print('Epoch', epoch, '| Time Spent:', round(time.time() - begin_epoch, 2))
 
     test()
@@ -317,6 +342,7 @@ state = {k: v for k, v in args._get_kwargs()}
 
 # Create model
 net = WideResNet(args.layers, num_classes, args.widen_factor, dropRate=args.droprate)
+# net = resnet20
 
 net.fc = nn.Linear(128, num_classes)
 net.rot_pred = nn.Linear(128, 4)

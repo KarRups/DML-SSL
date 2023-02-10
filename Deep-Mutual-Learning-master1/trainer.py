@@ -19,7 +19,7 @@ import shutil
 
 from tqdm import tqdm
 from utils import accuracy, AverageMeter
-from resnet import resnet32
+from resnet import resnet20
 from tensorboard_logger import configure, log_value
 
 class Trainer(object):
@@ -206,7 +206,9 @@ class Trainer(object):
                             kl_loss += self.loss_kl(F.log_softmax(outputs[i], dim = 1), 
                                                     F.softmax(Variable(outputs[j]), dim=1))
                     loss = ce_loss + kl_loss / (self.model_num - 1)
-                    
+                    # Why is there a log on top and not on the bottom?
+                    # 'To avoid underflow issues when computing this quantity, this loss expects the argument input in the log-space'
+
                     # measure accuracy and record loss
                     prec = accuracy(outputs[i].data, labels.data, topk=(1,))[0]
                     losses[i].update(loss.item(), images.size()[0])

@@ -275,7 +275,7 @@ class CIFAR10(data.Dataset):
         os.chdir(cwd)
 
 
-class CIFAR100(CIFAR100):
+class CIFAR100(CIFAR10):
     base_folder = 'cifar-100-python'
     url = "http://www.cs.toronto.edu/~kriz/cifar-100-python.tar.gz"
     filename = "cifar-100-python.tar.gz"
