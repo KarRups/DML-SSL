@@ -176,8 +176,10 @@ if args.load != '':
 
 if args.ngpu > 1:
     net = torch.nn.DataParallel(net, device_ids=list(range(args.ngpu)))
+    net2 = torch.nn.DataParallel(net, device_ids=list(range(args.ngpu)))
 
 if args.ngpu > 0:
+    
     net.cuda()
     torch.cuda.manual_seed(1)
 
@@ -221,6 +223,7 @@ def train(no_correction=True, C_hat_transpose=None, scheduler=scheduler):
     net.train()     # enter train mode # what does that mean?
     net.train2() 
     loss_avg = 0.0
+    loss_avg2 = 0.0
     for bx, by in train_loader:
         bx, by = bx.cuda(), by.cuda()
 
@@ -256,38 +259,47 @@ def train(no_correction=True, C_hat_transpose=None, scheduler=scheduler):
             bx, by_prime = bx.cuda(), by_prime.cuda()
 
             _, pen = net(bx * 2 - 1)
+            _, pen2 = net2(bx * 2 - 1)
 
             loss += 0.5 * F.cross_entropy(net.rot_pred(pen), by_prime)
-            loss2 += 0.5 * F.cross_entropy(net2.rot_pred(pen), by_prime)
+            loss2 += 0.5 * F.cross_entropy(net2.rot_pred(pen2), by_prime)
 
 
             # KL loss, 
-            kl_loss += loss_kl(F.log_softmax(net.rot_pred(pen),dim = 1), F.log_softmax(net2.rot_pred(pen),dim = 1))
+            kl_loss += loss_kl(F.log_softmax(net.rot_pred(pen),dim = 1), F.log_softmax(net2.rot_pred(pen2),dim = 1))
             loss += kl_loss 
             
-            kl_loss2 += loss_kl(F.log_softmax(net2.rot_pred(pen),dim = 1), F.log_softmax(net.rot_pred(pen),dim = 1))
+            kl_loss2 += loss_kl(F.log_softmax(net2.rot_pred(pen2),dim = 1), F.log_softmax(net.rot_pred(pen),dim = 1))
             loss2 += kl_loss 
 
 
         loss.backward()
         optimizer.step() # Ignore warning, this is the right order        
 
+        # For some reason loss2.backward wants to go before optimiser.step?
         loss2.backward()
         optimizer2.step() # Ignore warning, this is the right order        
 
         # exponential moving average
         loss_avg = loss_avg * 0.95 + loss.item() * 0.05
+        loss_avg2 = loss_avg2 * 0.95 + loss2.item() * 0.05
+
 
     state['train_loss'] = loss_avg
-
+    state['train_loss2'] = loss_avg2
 # Now to TEST
 
 # test function (forward only)
 def test():
     torch.set_grad_enabled(False)
     net.eval()
+    net2.eval()
     loss_avg = 0.0
     correct = 0
+
+    loss_avg2 = 0.0
+    correct2 = 0
+
     for bx, by in test_loader:
         bx, by = bx.cuda(), by.cuda()
 
@@ -295,15 +307,27 @@ def test():
         logits, pen = net(bx * 2 - 1) # Does the -1 mean look at the penultimate layer? Or is it just the ','
         loss = F.cross_entropy(logits, by)
 
+        logits2, pen2 = net2(bx * 2 - 1)
+        loss2 = F.cross_entropy(logits2, by)
+
+        
         # accuracy
         pred = logits.data.max(1)[1]
         correct += pred.eq(by.data).sum().item()
 
+        pred2 = logits2.data.max(1)[1]
+        correct2 += pred2.eq(by.data).sum().item()
+
+
         # test loss average
         loss_avg += loss.item()
+        loss_avg2 += loss2.item()
 
-    state['test_loss'] = loss_avg / len(test_loader)
+    #state['test_loss'] = loss_avg / len(test_loader)
     state['test_accuracy'] = correct / len(test_loader.dataset)
+    #state['test_loss2'] = loss_avg2 / len(test_loader)
+    state['test_accuracy2'] = correct2 / len(test_loader.dataset)
+
     torch.set_grad_enabled(True)
 
 
@@ -319,8 +343,7 @@ for epoch in range(args.epochs):
 
     log.write('%s\n' % json.dumps(state))
     log.flush()
-    print(state)
-
+    print(state) # Can silence some terms I don't care about seeing, loss for now
 
 print('\nNow retraining with correction\n')
 
