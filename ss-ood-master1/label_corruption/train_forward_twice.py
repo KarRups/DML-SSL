@@ -29,7 +29,7 @@ parser.add_argument('--data_path', type=str, default='./data/cifarpy',
 parser.add_argument('--dataset', type=str, default='cifar10', choices=['cifar10', 'cifar100'],
     help='Choose between CIFAR-10, CIFAR-100.')
 # Optimization options
-parser.add_argument('--epochs', '-e', type=int, default=2, help='Number of epochs to train.') # Changed to 2 to see whole thing, default 100
+parser.add_argument('--epochs', '-e', type=int, default=10, help='Number of epochs to train.') # Changed to 2 to see whole thing, default 100
 parser.add_argument('--batch_size', '-b', type=int, default=128, help='Batch size.')
 parser.add_argument('--gold_fraction', '-gf', type=float, default=0, help='What fraction of the data should be trusted?')
 parser.add_argument('--corruption_prob', '-cprob', type=float, default=0.3, help='The label corruption probability.')
@@ -220,7 +220,7 @@ scheduler = torch.optim.lr_scheduler.LambdaLR(
 loss_kl = nn.KLDivLoss(reduction='batchmean')
 # train function (forward, backward, update)
 # This performs a training step, need it to call both models in here
-def train(no_correction=True, C_hat_transpose=None, scheduler=scheduler):
+def train(no_correction=True, C_hat_transpose=None, C_hat_transpose2=None, scheduler=scheduler):
     net.train()     # enter train mode # what does that mean?
     net2.train() 
     loss_avg = 0.0
@@ -243,11 +243,12 @@ def train(no_correction=True, C_hat_transpose=None, scheduler=scheduler):
             loss = F.cross_entropy(logits, by)
             loss2 = F.cross_entropy(logits2, by)
         else:
-            pre1 = C_hat_transpose[torch.cuda.LongTensor(by.data)]
+            pre1 = C_hat_transpose[torch.cuda.LongTensor(by.data)] # The 2 copy is tentative
             pre2 = torch.mul(F.softmax(logits), pre1)
             loss = -(torch.log(pre2.sum(1))).mean()
 
-            pre22 = torch.mul(F.softmax(logits2), pre1)
+            pre12 = C_hat_transpose2[torch.cuda.LongTensor(by.data)]
+            pre22 = torch.mul(F.softmax(logits2), pre12)
             loss2 = -(torch.log(pre22.sum(1))).mean()
             
         if not args.no_ss:
@@ -268,10 +269,10 @@ def train(no_correction=True, C_hat_transpose=None, scheduler=scheduler):
 
 
             # KL loss, set to 0 for now
-            kl_loss += loss_kl(F.log_softmax(net.rot_pred(pen),dim = 1), F.log_softmax(net2.rot_pred(pen2),dim = 1))
+            kl_loss += 0.001*loss_kl(F.log_softmax(net.rot_pred(pen),dim = 1), F.softmax(net2.rot_pred(pen2),dim = 1))
             loss += kl_loss 
             
-            kl_loss2 += loss_kl(F.log_softmax(net2.rot_pred(pen2),dim = 1), F.log_softmax(net.rot_pred(pen),dim = 1))
+            kl_loss2 += 0.001*loss_kl(F.log_softmax(net2.rot_pred(pen2),dim = 1), F.softmax(net.rot_pred(pen),dim = 1))
             loss2 += kl_loss2 
 
         loss3 = loss + loss2
@@ -343,14 +344,16 @@ for epoch in range(args.epochs):
 
     log.write('%s\n' % json.dumps(state))
     log.flush()
-    print(state) # Can silence some terms I don't care about seeing, loss for now
+    print(state)
 
 print('\nNow retraining with correction\n')
 
 # Will need to do this seperately for each
 def get_C_hat_transpose():
     probs = []
+    probs2 = []
     net.eval()
+    net2.eval()
     for batch_idx, (data, target) in enumerate(train_loader_deterministic):
         data, target = V(data.cuda()),\
                        V(target.cuda())
@@ -359,9 +362,17 @@ def get_C_hat_transpose():
         output, pen = net(data)
         pred = F.softmax(output)
         probs.extend(list(pred.data.cpu().numpy()))
+        
+        output2, pen2 = net(data)
+        pred2 = F.softmax(output2)
+        probs2.extend(list(pred2.data.cpu().numpy()))
 
     probs = np.array(probs, dtype=np.float32)
     C_hat = np.zeros((num_classes, num_classes))
+    
+    probs2 = np.array(probs, dtype=np.float32)
+    C_hat2 = np.zeros((num_classes, num_classes))
+    
     for label in range(num_classes):
         class_probs = probs[:, label]
         if args.dataset == 'cifar10':
@@ -370,13 +381,23 @@ def get_C_hat_transpose():
 
         C_hat[label] = probs[np.argmax(class_probs)]
 
+    for label in range(num_classes):
+        class_probs2 = probs2[:, label]
+        if args.dataset == 'cifar10':
+            threshold2 = np.percentile(class_probs, 97, interpolation='higher')
+            class_probs2[class_probs2 >= threshold2] = 0
+
+        C_hat2[label] = probs[np.argmax(class_probs)]
+
         # C_hat[label] = probs[np.argsort(class_probs)][-1]
 
-    return C_hat.T.astype(np.float32)
+    return C_hat.T.astype(np.float32), C_hat2.T.astype(np.float32)
 
-C_hat_transpose = torch.from_numpy(get_C_hat_transpose())
+C_hat_transpose = torch.from_numpy(get_C_hat_transpose()[0]) # The [] seems wrong
 C_hat_transpose = V(C_hat_transpose.cuda(), requires_grad=False)
 
+C_hat_transpose2 = torch.from_numpy(get_C_hat_transpose()[1])
+C_hat_transpose2 = V(C_hat_transpose2.cuda(), requires_grad=False)
 
 # /////// Resetting the network ////////
 state = {k: v for k, v in args._get_kwargs()}
@@ -385,10 +406,14 @@ state = {k: v for k, v in args._get_kwargs()}
 # Create model
 #net = WideResNet(args.layers, num_classes, args.widen_factor, dropRate=args.droprate)
 net = resnet20()
+net2 = resnet20
 
 # 64 for Resnet20, 128 for WideResnet
 net.fc = nn.Linear(64, num_classes)
 net.rot_pred = nn.Linear(64, 4)
+
+net2.fc = nn.Linear(64, num_classes)
+net2.rot_pred = nn.Linear(64, 4)
 
 start_epoch = 0
 
@@ -407,10 +432,15 @@ if args.load != '':
 
 if args.ngpu > 0:
     net.cuda()
+    net2.cuda()
     torch.cuda.manual_seed(1)
 
 optimizer = torch.optim.SGD(
     net.parameters(), state['learning_rate'], momentum=state['momentum'],
+    weight_decay=state['decay'], nesterov=True)
+
+optimizer2 = torch.optim.SGD(
+    net2.parameters(), state['learning_rate'], momentum=state['momentum'],
     weight_decay=state['decay'], nesterov=True)
 
 scheduler = torch.optim.lr_scheduler.LambdaLR(
@@ -430,7 +460,7 @@ for epoch in range(args.epochs):
     state['epoch'] = epoch
 
     begin_epoch = time.time()
-    train(no_correction=False, C_hat_transpose=C_hat_transpose, scheduler=scheduler)
+    train(no_correction=False, C_hat_transpose=C_hat_transpose,C_hat_transpose2=C_hat_transpose2, scheduler=scheduler) # Good if C_hat_transpose was a vector and we summoned each
     print('Epoch', epoch, '| Time Spent:', round(time.time() - begin_epoch, 2))
 
     test()
