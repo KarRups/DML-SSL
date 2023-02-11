@@ -117,11 +117,11 @@ class ResNet(nn.Module):
         out = out.view(out.size(0), -1)
         
         # Remove this
-        out = self.linear(out)
+        #out = self.linear(out)
 
         #replace with new bit in return section
-        return out
-        #return self.linear(out), out
+        #return out
+        return self.linear(out), out
 
 def resnet20():
     return ResNet(BasicBlock, [3, 3, 3])

@@ -181,6 +181,7 @@ if args.ngpu > 1:
 if args.ngpu > 0:
     
     net.cuda()
+    net2.cuda()
     torch.cuda.manual_seed(1)
 
 cudnn.benchmark = True  # fire on all cylinders
@@ -221,7 +222,7 @@ loss_kl = nn.KLDivLoss(reduction='batchmean')
 # This performs a training step, need it to call both models in here
 def train(no_correction=True, C_hat_transpose=None, scheduler=scheduler):
     net.train()     # enter train mode # what does that mean?
-    net.train2() 
+    net2.train() 
     loss_avg = 0.0
     loss_avg2 = 0.0
     for bx, by in train_loader:
@@ -230,12 +231,13 @@ def train(no_correction=True, C_hat_transpose=None, scheduler=scheduler):
         #for model in models: (indent stuff below)
         # forward
         logits, _ = net(bx * 2 - 1) # change 'net' to 'models'? could also leave it as kind of scrappy code and manually write 'net' and 'nets'
-        logits2 = net2(bx * 2 - 1)
+        logits2, _ = net2(bx * 2 - 1)
 
         # backward
         kl_loss = 0
         kl_loss2 = 0
         optimizer.zero_grad()
+        optimizer2.zero_grad()
         scheduler.step()
         if no_correction:
             loss = F.cross_entropy(logits, by)
@@ -265,19 +267,17 @@ def train(no_correction=True, C_hat_transpose=None, scheduler=scheduler):
             loss2 += 0.5 * F.cross_entropy(net2.rot_pred(pen2), by_prime)
 
 
-            # KL loss, 
+            # KL loss, set to 0 for now
             kl_loss += loss_kl(F.log_softmax(net.rot_pred(pen),dim = 1), F.log_softmax(net2.rot_pred(pen2),dim = 1))
             loss += kl_loss 
             
             kl_loss2 += loss_kl(F.log_softmax(net2.rot_pred(pen2),dim = 1), F.log_softmax(net.rot_pred(pen),dim = 1))
-            loss2 += kl_loss 
+            loss2 += kl_loss2 
 
+        loss3 = loss + loss2
+        loss3.backward()
 
-        loss.backward()
         optimizer.step() # Ignore warning, this is the right order        
-
-        # For some reason loss2.backward wants to go before optimiser.step?
-        loss2.backward()
         optimizer2.step() # Ignore warning, this is the right order        
 
         # exponential moving average
@@ -323,9 +323,9 @@ def test():
         loss_avg += loss.item()
         loss_avg2 += loss2.item()
 
-    #state['test_loss'] = loss_avg / len(test_loader)
+    state['test_loss'] = loss_avg / len(test_loader)
     state['test_accuracy'] = correct / len(test_loader.dataset)
-    #state['test_loss2'] = loss_avg2 / len(test_loader)
+    state['test_loss2'] = loss_avg2 / len(test_loader)
     state['test_accuracy2'] = correct2 / len(test_loader.dataset)
 
     torch.set_grad_enabled(True)
@@ -347,7 +347,7 @@ for epoch in range(args.epochs):
 
 print('\nNow retraining with correction\n')
 
-
+# Will need to do this seperately for each
 def get_C_hat_transpose():
     probs = []
     net.eval()
