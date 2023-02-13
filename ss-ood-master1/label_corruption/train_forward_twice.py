@@ -385,19 +385,16 @@ def get_C_hat_transpose():
     
     for label in range(num_classes):
         class_probs = probs[:, label]
+        class_probs2 = probs2[:, label]
+    
         if args.dataset == 'cifar10':
             threshold = np.percentile(class_probs, 97, interpolation='higher')
             class_probs[class_probs >= threshold] = 0
-
-        C_hat[label] = probs[np.argmax(class_probs)]
-
-    for label in range(num_classes):
-        class_probs2 = probs2[:, label]
-        if args.dataset == 'cifar10':
-            threshold2 = np.percentile(class_probs, 97, interpolation='higher')
+            threshold2 = np.percentile(class_probs2, 97, interpolation='higher')
             class_probs2[class_probs2 >= threshold2] = 0
 
-        C_hat2[label] = probs[np.argmax(class_probs)]
+        C_hat[label] = probs[np.argmax(class_probs)]    
+        C_hat2[label] = probs2[np.argmax(class_probs2)]
 
         # C_hat[label] = probs[np.argsort(class_probs)][-1]
 
