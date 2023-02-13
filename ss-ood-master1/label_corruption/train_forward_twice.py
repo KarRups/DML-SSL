@@ -207,6 +207,15 @@ scheduler = torch.optim.lr_scheduler.LambdaLR(
         1,  # since lr_lambda computes multiplicative factor
         1e-6 / args.learning_rate))
 
+# Might need to do scheduler for the second model too?
+scheduler2 = torch.optim.lr_scheduler.LambdaLR(
+    optimizer2,
+    lr_lambda=lambda step: cosine_annealing(
+        step,
+        args.epochs * len(train_loader),
+        1,  # since lr_lambda computes multiplicative factor
+        1e-6 / args.learning_rate))
+
 
 # Need a for loop in the training
 #  for i in range(self.model_num):
@@ -239,6 +248,7 @@ def train(no_correction=True, C_hat_transpose=None, C_hat_transpose2=None, sched
         optimizer.zero_grad()
         optimizer2.zero_grad()
         scheduler.step()
+        scheduler2.step()
         if no_correction:
             loss = F.cross_entropy(logits, by)
             loss2 = F.cross_entropy(logits2, by)
@@ -406,7 +416,7 @@ state = {k: v for k, v in args._get_kwargs()}
 # Create model
 #net = WideResNet(args.layers, num_classes, args.widen_factor, dropRate=args.droprate)
 net = resnet20()
-net2 = resnet20
+net2 = resnet20()
 
 # 64 for Resnet20, 128 for WideResnet
 net.fc = nn.Linear(64, num_classes)
@@ -445,6 +455,14 @@ optimizer2 = torch.optim.SGD(
 
 scheduler = torch.optim.lr_scheduler.LambdaLR(
     optimizer,
+    lr_lambda=lambda step: cosine_annealing(
+        step,
+        args.epochs * len(train_loader),
+        1,  # since lr_lambda computes multiplicative factor
+        1e-6 / args.learning_rate))
+
+scheduler2 = torch.optim.lr_scheduler.LambdaLR(
+    optimizer2,
     lr_lambda=lambda step: cosine_annealing(
         step,
         args.epochs * len(train_loader),
