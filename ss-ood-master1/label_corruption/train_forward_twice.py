@@ -20,6 +20,7 @@ import torch.nn as nn
 # Line 283 is where I stopped
 # note: nosgdr, schedule, and epochs are highly related settings
 # Line 155 can be changed to try training on resnet20
+# Setting default corruption probability to 0, can deal with that later
 
 parser = argparse.ArgumentParser(description='Trains WideResNet on CIFAR',
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -32,7 +33,7 @@ parser.add_argument('--dataset', type=str, default='cifar10', choices=['cifar10'
 parser.add_argument('--epochs', '-e', type=int, default=10, help='Number of epochs to train.') # Changed to 2 to see whole thing, default 100
 parser.add_argument('--batch_size', '-b', type=int, default=128, help='Batch size.')
 parser.add_argument('--gold_fraction', '-gf', type=float, default=0, help='What fraction of the data should be trusted?')
-parser.add_argument('--corruption_prob', '-cprob', type=float, default=0.3, help='The label corruption probability.')
+parser.add_argument('--corruption_prob', '-cprob', type=float, default=0, help='The label corruption probability.')
 parser.add_argument('--corruption_type', '-ctype', type=str, default='unif', help='Type of corruption ("unif" or "flip").')
 parser.add_argument('--no_ss', action='store_true', help='Turns off self-supervised auxiliary objective(s)')
 parser.add_argument('--learning_rate', '-lr', type=float, default=0.1, help='The initial learning rate.')
@@ -47,10 +48,10 @@ parser.add_argument('--save', '-s', type=str, default='./', help='Folder to save
 parser.add_argument('--load', '-l', type=str, default='', help='Checkpoint path to resume / test.')
 parser.add_argument('--test', '-t', action='store_true', help='Test only flag.')
 #  - need to change this to be resnet 20? Could alternatively use wrn and just decrease number of layers/widen factor
-parser.add_argument('--layers', default=40, type=int, help='total number of layers (default: 28)')
-parser.add_argument('--widen-factor', default=2, type=int, help='widen factor (default: 10)')
+#parser.add_argument('--layers', default=40, type=int, help='total number of layers (default: 28)')
+#parser.add_argument('--widen-factor', default=2, type=int, help='widen factor (default: 10)')
 parser.add_argument('--droprate', default=0.3, type=float, help='dropout probability (default: 0.0)')
-parser.add_argument('--nonlinearity', type=str, default='relu', help='Nonlinearity (relu, elu, gelu).')
+parser.add_argument('--nonlinearit\y', type=str, default='relu', help='Nonlinearity (relu, elu, gelu).')
 # Acceleration
 parser.add_argument('--ngpu', type=int, default=1, help='0 = CPU.')
 parser.add_argument('--prefetch', type=int, default=2, help='Pre-fetching threads.')
@@ -279,6 +280,8 @@ def train(no_correction=True, C_hat_transpose=None, C_hat_transpose2=None, sched
 
 
             # KL loss, set to 0 for now
+            # KL loss, set to 0 for now, this part just gets ignored? /0 gives no error but also doesn't train
+            # Should ask it to state KL loss over time, compare to other parts
             kl_loss += 0.001*loss_kl(F.log_softmax(net.rot_pred(pen),dim = 1), F.softmax(net2.rot_pred(pen2),dim = 1))
             loss += kl_loss 
             
@@ -298,6 +301,7 @@ def train(no_correction=True, C_hat_transpose=None, C_hat_transpose2=None, sched
 
     state['train_loss'] = loss_avg
     state['train_loss2'] = loss_avg2
+    state['Avg_KL_Loss'] = 0.5*(kl_loss + kl_loss2)
 # Now to TEST
 
 # test function (forward only)
