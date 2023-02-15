@@ -227,7 +227,7 @@ scheduler2 = torch.optim.lr_scheduler.LambdaLR(
 #            self.models.append(model)
 
 # Define KL loss for later
-loss_kl = nn.KLDivLoss(reduction='batchmean')
+#loss_kl = nn.KLDivLoss(reduction='batchmean')
 # train function (forward, backward, update)
 # This performs a training step, need it to call both models in here
 def train(no_correction=True, C_hat_transpose=None, C_hat_transpose2=None, scheduler=scheduler):
@@ -244,8 +244,8 @@ def train(no_correction=True, C_hat_transpose=None, C_hat_transpose2=None, sched
         logits2, _ = net2(bx * 2 - 1)
 
         # backward
-        kl_loss = 0
-        kl_loss2 = 0
+        DML_loss = 0
+        DML_loss2 = 0
         optimizer.zero_grad()
         optimizer2.zero_grad()
         scheduler.step()
@@ -282,11 +282,12 @@ def train(no_correction=True, C_hat_transpose=None, C_hat_transpose2=None, sched
             # KL loss, set to 0 for now
             # KL loss, set to 0 for now, this part just gets ignored? /0 gives no error but also doesn't train
             # Should ask it to state KL loss over time, compare to other parts
-            kl_loss += 0.001*loss_kl(F.log_softmax(net.rot_pred(pen),dim = 1), F.softmax(net2.rot_pred(pen2),dim = 1))
-            loss += kl_loss 
+            DML_loss += F.cross_entropy(F.softmax(net.rot_pred(pen), dim = 1), F.softmax(net2.rot_pred(pen2), dim = 1))
+            loss += DML_loss 
             
-            kl_loss2 += 0.001*loss_kl(F.log_softmax(net2.rot_pred(pen2),dim = 1), F.softmax(net.rot_pred(pen),dim = 1))
-            loss2 += kl_loss2 
+            #kl_loss2 += 0.01*loss_kl(F.log_softmax(net2.rot_pred(pen2),dim = 1), F.softmax(net.rot_pred(pen),dim = 1))
+            DML_loss2 += F.cross_entropy(F.softmax(net2.rot_pred(pen2),dim = 1), F.softmax(net.rot_pred(pen),dim = 1))
+            loss2 += DML_loss2 
 
         loss3 = loss + loss2
         loss3.backward()
@@ -301,7 +302,7 @@ def train(no_correction=True, C_hat_transpose=None, C_hat_transpose2=None, sched
 
     state['train_loss'] = loss_avg
     state['train_loss2'] = loss_avg2
-    state['Avg_KL_Loss'] = 0.5*(kl_loss.item() + kl_loss2.item())
+    state['Avg_DML_Loss'] = 0.5*(DML_loss.item() + DML_loss2.item())
 # Now to TEST
 
 # test function (forward only)
