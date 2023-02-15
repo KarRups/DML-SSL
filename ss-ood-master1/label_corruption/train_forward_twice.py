@@ -301,7 +301,7 @@ def train(no_correction=True, C_hat_transpose=None, C_hat_transpose2=None, sched
 
     state['train_loss'] = loss_avg
     state['train_loss2'] = loss_avg2
-    state['Avg_KL_Loss'] = 0.5*(kl_loss + kl_loss2)
+    state['Avg_KL_Loss'] = 0.5*(kl_loss.item() + kl_loss2.item())
 # Now to TEST
 
 # test function (forward only)
