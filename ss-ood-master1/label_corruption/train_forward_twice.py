@@ -30,7 +30,7 @@ parser.add_argument('--data_path', type=str, default='./data/cifarpy',
 parser.add_argument('--dataset', type=str, default='cifar10', choices=['cifar10', 'cifar100'],
     help='Choose between CIFAR-10, CIFAR-100.')
 # Optimization options
-parser.add_argument('--epochs', '-e', type=int, default=200, help='Number of epochs to train.') # Changed to 2 to see whole thing, default 100
+parser.add_argument('--epochs', '-e', type=int, default=20, help='Number of epochs to train.') # Changed to 2 to see whole thing, default 100
 parser.add_argument('--batch_size', '-b', type=int, default=128, help='Batch size.')
 parser.add_argument('--gold_fraction', '-gf', type=float, default=0, help='What fraction of the data should be trusted?')
 parser.add_argument('--corruption_prob', '-cprob', type=float, default=0, help='The label corruption probability.')
