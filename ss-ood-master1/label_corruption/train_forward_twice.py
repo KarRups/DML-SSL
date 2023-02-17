@@ -30,7 +30,7 @@ parser.add_argument('--data_path', type=str, default='./data/cifarpy',
 parser.add_argument('--dataset', type=str, default='cifar10', choices=['cifar10', 'cifar100'],
     help='Choose between CIFAR-10, CIFAR-100.')
 # Optimization options
-parser.add_argument('--epochs', '-e', type=int, default=10, help='Number of epochs to train.') # Changed to 2 to see whole thing, default 100
+parser.add_argument('--epochs', '-e', type=int, default=200, help='Number of epochs to train.') # Changed to 2 to see whole thing, default 100
 parser.add_argument('--batch_size', '-b', type=int, default=128, help='Batch size.')
 parser.add_argument('--gold_fraction', '-gf', type=float, default=0, help='What fraction of the data should be trusted?')
 parser.add_argument('--corruption_prob', '-cprob', type=float, default=0, help='The label corruption probability.')
@@ -282,12 +282,12 @@ def train(no_correction=True, C_hat_transpose=None, C_hat_transpose2=None, sched
             # KL loss, set to 0 for now
             # KL loss, set to 0 for now, this part just gets ignored? /0 gives no error but also doesn't train
             # Should ask it to state KL loss over time, compare to other parts
-            DML_loss += F.cross_entropy(F.softmax(net.rot_pred(pen), dim = 1), F.softmax(net2.rot_pred(pen2), dim = 1))
-            loss += DML_loss 
+        DML_loss += F.cross_entropy(F.softmax(net.rot_pred(pen), dim = 1), F.softmax(net2.rot_pred(pen2), dim = 1))
+        loss += DML_loss 
             
             #kl_loss2 += 0.01*loss_kl(F.log_softmax(net2.rot_pred(pen2),dim = 1), F.softmax(net.rot_pred(pen),dim = 1))
-            DML_loss2 += F.cross_entropy(F.softmax(net2.rot_pred(pen2),dim = 1), F.softmax(net.rot_pred(pen),dim = 1))
-            loss2 += DML_loss2 
+        DML_loss2 += F.cross_entropy(F.softmax(net2.rot_pred(pen2),dim = 1), F.softmax(net.rot_pred(pen),dim = 1))
+        loss2 += DML_loss2 
 
         loss3 = loss + loss2
         loss3.backward()
