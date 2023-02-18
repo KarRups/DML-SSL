@@ -11,7 +11,6 @@ import torch.nn.functional as F
 import torchvision.datasets as dset
 import torchvision.transforms as transforms
 from models.wrn_with_pen import WideResNet
-from models.resnet import resnet20
 import numpy as np
 from load_corrupted_data import CIFAR10, CIFAR100
 from PIL import Image
@@ -19,7 +18,6 @@ import torch.nn as nn
 
 
 # note: nosgdr, schedule, and epochs are highly related settings
-# Line 155 can be changed to try training on resnet20
 
 parser = argparse.ArgumentParser(description='Trains WideResNet on CIFAR',
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -29,7 +27,7 @@ parser.add_argument('--data_path', type=str, default='./data/cifarpy',
 parser.add_argument('--dataset', type=str, default='cifar10', choices=['cifar10', 'cifar100'],
     help='Choose between CIFAR-10, CIFAR-100.')
 # Optimization options
-parser.add_argument('--epochs', '-e', type=int, default=2, help='Number of epochs to train.') # Changed to 2 to see whole thing, default 100
+parser.add_argument('--epochs', '-e', type=int, default=100, help='Number of epochs to train.')
 parser.add_argument('--batch_size', '-b', type=int, default=128, help='Batch size.')
 parser.add_argument('--gold_fraction', '-gf', type=float, default=0, help='What fraction of the data should be trusted?')
 parser.add_argument('--corruption_prob', '-cprob', type=float, default=0.3, help='The label corruption probability.')
@@ -46,7 +44,7 @@ parser.add_argument('--gamma', type=float, default=0.1, help='LR is multiplied b
 parser.add_argument('--save', '-s', type=str, default='./', help='Folder to save checkpoints.')
 parser.add_argument('--load', '-l', type=str, default='', help='Checkpoint path to resume / test.')
 parser.add_argument('--test', '-t', action='store_true', help='Test only flag.')
-#  - need to change this to be resnet 20? Could alternatively use wrn and just decrease number of layers/widen factor
+# Architecture
 parser.add_argument('--layers', default=40, type=int, help='total number of layers (default: 28)')
 parser.add_argument('--widen-factor', default=2, type=int, help='widen factor (default: 10)')
 parser.add_argument('--droprate', default=0.3, type=float, help='dropout probability (default: 0.0)')
@@ -150,11 +148,9 @@ test_loader = torch.utils.data.DataLoader(test_data, batch_size=args.test_bs, sh
                                           num_workers=args.prefetch, pin_memory=True)
 
 
-# Create 
-# Think I should be able to swap this straight for Resnet 20, let me check it out
-#net = WideResNet(args.layers, num_classes, args.widen_factor, dropRate=args.droprate)
-net = resnet20()
-net.rot_pred = nn.Linear(64, 4) # change first entry to 64 for resnet20 layer, 128 for wide resnet
+# Create model
+net = WideResNet(args.layers, num_classes, args.widen_factor, dropRate=args.droprate)
+net.rot_pred = nn.Linear(128, 4)
 
 start_epoch = 0
 
@@ -199,34 +195,20 @@ scheduler = torch.optim.lr_scheduler.LambdaLR(
         1e-6 / args.learning_rate))
 
 
-# Need a for loop in the training
-#  for i in range(self.model_num):
-#            # build models
-#            model = resnet20()
-#            if self.use_gpu:
-#                model.cuda()           
-#            self.models.append(model)
 
-# Define KL loss for later
-loss_kl = nn.KLDivLoss(reduction='batchmean')
 # train function (forward, backward, update)
-# This performs a training step, need it to call both models in here
 def train(no_correction=True, C_hat_transpose=None, scheduler=scheduler):
-    net.train()     # enter train mode # what does that mean?
-    #net.train2() # Maybe?
+    net.train()     # enter train mode
     loss_avg = 0.0
     for bx, by in train_loader:
         bx, by = bx.cuda(), by.cuda()
 
-        #for model in models: (indent stuff below)
         # forward
-        logits, _ = net(bx * 2 - 1) # change 'net' to 'models'? could also leave it as kind of scrappy code and manually write 'net' and 'nets'
-        #logits2 = net2(bx * 2 - 1)
+        logits, _ = net(bx * 2 - 1)
 
         # backward
-        # kl_loss = 0
-        optimizer.zero_grad()
         scheduler.step()
+        optimizer.zero_grad()
         if no_correction:
             loss = F.cross_entropy(logits, by)
         else:
@@ -246,16 +228,8 @@ def train(no_correction=True, C_hat_transpose=None, scheduler=scheduler):
             _, pen = net(bx * 2 - 1)
 
             loss += 0.5 * F.cross_entropy(net.rot_pred(pen), by_prime)
-
-            # For j in range (model_num): # 2 for our case
-                #if i! = j:
-                    #kl_loss += self.loss_kl(F.log_softmax(outputs[i], dim = 1), 
-                    # F.softmax(Variable(outputs[j]), dim=1))
-            # loss += kl_loss/(model_num -1) #instead of model_num could start by just having it for two models explictly stated
-
-
         loss.backward()
-        optimizer.step() # Ignore warning, this is the right order        
+        optimizer.step()
 
         # exponential moving average
         loss_avg = loss_avg * 0.95 + loss.item() * 0.05
@@ -273,7 +247,7 @@ def test():
         bx, by = bx.cuda(), by.cuda()
 
         # forward
-        logits, pen = net(bx * 2 - 1) # Does the -1 mean look at the penultimate layer? Or is it just the ','
+        logits, pen = net(bx * 2 - 1)
         loss = F.cross_entropy(logits, by)
 
         # accuracy
@@ -293,7 +267,7 @@ for epoch in range(args.epochs):
     state['epoch'] = epoch
 
     begin_epoch = time.time()
-    train(scheduler=scheduler) # don't even need to tell it who to train here
+    train(scheduler=scheduler)
     print('Epoch', epoch, '| Time Spent:', round(time.time() - begin_epoch, 2))
 
     test()
@@ -341,12 +315,10 @@ state = {k: v for k, v in args._get_kwargs()}
 
 
 # Create model
-#net = WideResNet(args.layers, num_classes, args.widen_factor, dropRate=args.droprate)
-net = resnet20()
+net = WideResNet(args.layers, num_classes, args.widen_factor, dropRate=args.droprate)
 
-# 64 for Resnet20, 128 for WideResnet
-net.fc = nn.Linear(64, num_classes)
-net.rot_pred = nn.Linear(64, 4)
+net.fc = nn.Linear(128, num_classes)
+net.rot_pred = nn.Linear(128, 4)
 
 start_epoch = 0
 
