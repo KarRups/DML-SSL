@@ -11,7 +11,7 @@ import torch.nn.functional as F
 import torchvision.datasets as dset
 import torchvision.transforms as transforms
 from models.wrn_with_pen import WideResNet
-from models.resnet import resnet20
+from models.resnet import resnet10
 import numpy as np
 from load_corrupted_data import CIFAR10, CIFAR100
 from PIL import Image
@@ -20,7 +20,7 @@ import torch.nn as nn
 # Line 283 is where I stopped
 # note: nosgdr, schedule, and epochs are highly related settings
 # Line 155 can be changed to try training on resnet20
-# Setting default corruption probability to 0, can deal with that later
+# Setting default corruption probability to 0.8, can deal with that later
 
 parser = argparse.ArgumentParser(description='Trains WideResNet on CIFAR',
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -30,10 +30,10 @@ parser.add_argument('--data_path', type=str, default='./data/cifarpy',
 parser.add_argument('--dataset', type=str, default='cifar10', choices=['cifar10', 'cifar100'],
     help='Choose between CIFAR-10, CIFAR-100.')
 # Optimization options
-parser.add_argument('--epochs', '-e', type=int, default=20, help='Number of epochs to train.') # Changed to 2 to see whole thing, default 100
+parser.add_argument('--epochs', '-e', type=int, default=50, help='Number of epochs to train.') # Changed to 2 to see whole thing, default 100
 parser.add_argument('--batch_size', '-b', type=int, default=128, help='Batch size.')
 parser.add_argument('--gold_fraction', '-gf', type=float, default=0, help='What fraction of the data should be trusted?')
-parser.add_argument('--corruption_prob', '-cprob', type=float, default=0, help='The label corruption probability.')
+parser.add_argument('--corruption_prob', '-cprob', type=float, default=0.8, help='The label corruption probability.')
 parser.add_argument('--corruption_type', '-ctype', type=str, default='unif', help='Type of corruption ("unif" or "flip").')
 parser.add_argument('--no_ss', action='store_true', help='Turns off self-supervised auxiliary objective(s)')
 parser.add_argument('--learning_rate', '-lr', type=float, default=0.1, help='The initial learning rate.')
@@ -150,14 +150,23 @@ train_loader_deterministic = torch.utils.data.DataLoader(
 test_loader = torch.utils.data.DataLoader(test_data, batch_size=args.test_bs, shuffle=False,
                                           num_workers=args.prefetch, pin_memory=True)
 
+ood_dataset = dset.EUROSAT(root='data/',
+                                             train=False, 
+                                             transform= test_transform,  #replace with = transform after
+                                             download=True)
+
+ood_loader = torch.utils.data.DataLoader(dataset=ood_dataset,
+                                            batch_size= args.batch_size, 
+                                            shuffle=True)
+
 
 # Create 
 # Think I should be able to swap this straight for Resnet 20, let me check it out
 #net = WideResNet(args.layers, num_classes, args.widen_factor, dropRate=args.droprate)
-net = resnet20()
+net = resnet10()
 net.rot_pred = nn.Linear(64, 4) # change first entry to 64 for resnet20 layer, 128 for wide resnet
 
-net2 = resnet20()
+net2 = resnet10()
 net2.rot_pred = nn.Linear(64, 4) # change first entry to 64 for resnet20 layer, 128 for wide resnet
 
 start_epoch = 0
@@ -347,6 +356,35 @@ def test():
     torch.set_grad_enabled(True)
 
 
+def ood_test():
+    torch.set_grad_enabled(False)
+    net.eval()
+    net2.eval()
+    ood_loss_avg = 0.0
+    
+    ood_loss_avg2 = 0.0
+    unif = torch.tensor([0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1])
+    for bx, by in ood_loader:
+        bx, by = bx.cuda(), by.cuda()
+
+        # forward
+        logits, pen = net(bx * 2 - 1) # Does the -1 mean look at the penultimate layer? Or is it just the ','
+        ood_loss = F.cross_entropy(logits, unif)
+
+        logits2, pen2 = net2(bx * 2 - 1)
+        ood_loss2 = F.cross_entropy(logits2, unif)
+
+
+        # test loss average
+        ood_loss_avg += ood_loss.item()
+        ood_loss_avg2 += ood_loss2.item()
+
+    state['ood_test_loss'] = ood_loss_avg / len(ood_loader)
+    state['ood_test_loss2'] = ood_loss_avg2 / len(ood_loader)
+
+    torch.set_grad_enabled(True)
+
+
 # Main loop
 for epoch in range(args.epochs):
     state['epoch'] = epoch
@@ -417,8 +455,8 @@ state = {k: v for k, v in args._get_kwargs()}
 
 # Create model
 #net = WideResNet(args.layers, num_classes, args.widen_factor, dropRate=args.droprate)
-net = resnet20()
-net2 = resnet20()
+net = resnet10()
+net2 = resnet10()
 
 # 64 for Resnet20, 128 for WideResnet
 net.fc = nn.Linear(64, num_classes)
