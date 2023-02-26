@@ -11,7 +11,7 @@ import torch.nn.functional as F
 import torchvision.datasets as dset
 import torchvision.transforms as transforms
 from models.wrn_with_pen import WideResNet
-from models.resnet import resnet10
+from models.resnet import resnet20
 import numpy as np
 from load_corrupted_data import CIFAR10, CIFAR100
 from PIL import Image
@@ -150,23 +150,15 @@ train_loader_deterministic = torch.utils.data.DataLoader(
 test_loader = torch.utils.data.DataLoader(test_data, batch_size=args.test_bs, shuffle=False,
                                           num_workers=args.prefetch, pin_memory=True)
 
-ood_dataset = dset.EUROSAT(root='data/',
-                                             train=False, 
-                                             transform= test_transform,  #replace with = transform after
-                                             download=True)
-
-ood_loader = torch.utils.data.DataLoader(dataset=ood_dataset,
-                                            batch_size= args.batch_size, 
-                                            shuffle=True)
 
 
 # Create 
 # Think I should be able to swap this straight for Resnet 20, let me check it out
 #net = WideResNet(args.layers, num_classes, args.widen_factor, dropRate=args.droprate)
-net = resnet10()
+net = resnet20()
 net.rot_pred = nn.Linear(64, 4) # change first entry to 64 for resnet20 layer, 128 for wide resnet
 
-net2 = resnet10()
+net2 = resnet20()
 net2.rot_pred = nn.Linear(64, 4) # change first entry to 64 for resnet20 layer, 128 for wide resnet
 
 start_epoch = 0
@@ -356,35 +348,6 @@ def test():
     torch.set_grad_enabled(True)
 
 
-def ood_test():
-    torch.set_grad_enabled(False)
-    net.eval()
-    net2.eval()
-    ood_loss_avg = 0.0
-    
-    ood_loss_avg2 = 0.0
-    unif = torch.tensor([0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1])
-    for bx, by in ood_loader:
-        bx, by = bx.cuda(), by.cuda()
-
-        # forward
-        logits, pen = net(bx * 2 - 1) # Does the -1 mean look at the penultimate layer? Or is it just the ','
-        ood_loss = F.cross_entropy(logits, unif)
-
-        logits2, pen2 = net2(bx * 2 - 1)
-        ood_loss2 = F.cross_entropy(logits2, unif)
-
-
-        # test loss average
-        ood_loss_avg += ood_loss.item()
-        ood_loss_avg2 += ood_loss2.item()
-
-    state['ood_test_loss'] = ood_loss_avg / len(ood_loader)
-    state['ood_test_loss2'] = ood_loss_avg2 / len(ood_loader)
-
-    torch.set_grad_enabled(True)
-
-
 # Main loop
 for epoch in range(args.epochs):
     state['epoch'] = epoch
@@ -455,8 +418,8 @@ state = {k: v for k, v in args._get_kwargs()}
 
 # Create model
 #net = WideResNet(args.layers, num_classes, args.widen_factor, dropRate=args.droprate)
-net = resnet10()
-net2 = resnet10()
+net = resnet20()
+net2 = resnet20()
 
 # 64 for Resnet20, 128 for WideResnet
 net.fc = nn.Linear(64, num_classes)
