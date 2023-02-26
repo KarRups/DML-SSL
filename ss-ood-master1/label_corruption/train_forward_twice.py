@@ -50,7 +50,7 @@ parser.add_argument('--test', '-t', action='store_true', help='Test only flag.')
 #  - need to change this to be resnet 20? Could alternatively use wrn and just decrease number of layers/widen factor
 #parser.add_argument('--layers', default=40, type=int, help='total number of layers (default: 28)')
 #parser.add_argument('--widen-factor', default=2, type=int, help='widen factor (default: 10)')
-parser.add_argument('--droprate', default=0.3, type=float, help='dropout probability (default: 0.0)')
+parser.add_argument('--droprate', default=0.1, type=float, help='dropout probability (default: 0.0)')
 parser.add_argument('--nonlinearit\y', type=str, default='relu', help='Nonlinearity (relu, elu, gelu).')
 # Acceleration
 parser.add_argument('--ngpu', type=int, default=1, help='0 = CPU.')
@@ -245,8 +245,6 @@ def train(no_correction=True, C_hat_transpose=None, C_hat_transpose2=None, sched
         logits2, _ = net2(bx * 2 - 1)
 
         # backward
-        DML_loss = 0
-        DML_loss2 = 0
         optimizer.zero_grad()
         optimizer2.zero_grad()
         scheduler.step()
@@ -271,7 +269,7 @@ def train(no_correction=True, C_hat_transpose=None, C_hat_transpose2=None, sched
             #bx = np.concatenate((bx, np.rot90(bx, 1, axes=(2, 3)),
             #                     np.rot90(bx, 2, axes=(2, 3)), np.rot90(bx, 3, axes=(2, 3))), 0)
             #bx = torch.FloatTensor(bx)
-            bx = torch.cat(bx, torch.rot90(bx,1, axes=(2,3)),torch.rot90(bx, 2, axes=(2, 3)), torch.rot90(bx, 3, axes=(2, 3)), 0)
+            bx = torch.cat((bx, torch.rot90(bx,1, dims=[2,3]),torch.rot90(bx, 2, dims=[2, 3]), torch.rot90(bx, 3, dims=[2, 3])), 0)
             bx, by_prime = bx.cuda(), by_prime.cuda()
 
             _, pen = net(bx * 2 - 1)
@@ -284,12 +282,12 @@ def train(no_correction=True, C_hat_transpose=None, C_hat_transpose2=None, sched
             # KL loss, set to 0 for now
             # KL loss, set to 0 for now, this part just gets ignored? /0 gives no error but also doesn't train
             # Should ask it to state KL loss over time, compare to other parts
-        DML_loss += F.cross_entropy(net.rot_pred(pen), net2.rot_pred(pen2))
+        DML_loss = F.cross_entropy(net.rot_pred(pen), F.softmax(net2.rot_pred(pen2),dim=1))
         loss += DML_loss 
             
             #kl_loss2 += 0.01*loss_kl(F.log_softmax(net2.rot_pred(pen2),dim = 1), F.softmax(net.rot_pred(pen),dim = 1))
-        DML_loss2 += F.cross_entropy(net2.rot_pred(pen2), net.rot_pred(pen))
-        loss2 += DML_loss2 
+        DML_loss2 += F.cross_entropy(net2.rot_pred(pen2), F.softmax(net.rot_pred(pen),dim=1))
+        loss2 = DML_loss2 
 
         loss3 = loss + loss2
         loss3.backward()
@@ -354,10 +352,11 @@ for epoch in range(args.epochs):
     state['epoch'] = epoch
 
     begin_epoch = time.time()
-    train(scheduler=scheduler) # don't even need to tell it who to train here
+    train(scheduler=scheduler)
     print('Epoch', epoch, '| Time Spent:', round(time.time() - begin_epoch, 2))
 
-    test()
+    if (epoch%5==0):
+        test()
 
     log.write('%s\n' % json.dumps(state))
     log.flush()
