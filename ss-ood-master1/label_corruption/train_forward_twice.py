@@ -255,22 +255,23 @@ def train(no_correction=True, C_hat_transpose=None, C_hat_transpose2=None, sched
             loss = F.cross_entropy(logits, by)
             loss2 = F.cross_entropy(logits2, by)
         else:
-            pre1 = C_hat_transpose[torch.cuda.LongTensor(by.data)] # The 2 copy is tentative
-            pre2 = torch.mul(F.softmax(logits), pre1)
-            loss = -(torch.log(pre2.sum(1))).mean()
+            pre1 = C_hat_transpose[torch.cuda.LongTensor(by.data)] 
+            pre2 = torch.mul(F.softmax(logits), pre1) + 1e-6
+            loss = -(torch.log(pre2.sum(1))).mean() 
 
             pre12 = C_hat_transpose2[torch.cuda.LongTensor(by.data)]
-            pre22 = torch.mul(F.softmax(logits2), pre12)
+            pre22 = torch.mul(F.softmax(logits2), pre12) + 1e-6
             loss2 = -(torch.log(pre22.sum(1))).mean()
             
         if not args.no_ss:
             curr_batch_size = bx.size(0)
             by_prime = torch.cat((torch.zeros(bx.size(0)), torch.ones(bx.size(0)),
                                   2*torch.ones(bx.size(0)), 3*torch.ones(bx.size(0))), 0).long()
-            bx = bx.cpu().numpy()
-            bx = np.concatenate((bx, np.rot90(bx, 1, axes=(2, 3)),
-                                 np.rot90(bx, 2, axes=(2, 3)), np.rot90(bx, 3, axes=(2, 3))), 0)
-            bx = torch.FloatTensor(bx)
+            #bx = bx.cpu().numpy()
+            #bx = np.concatenate((bx, np.rot90(bx, 1, axes=(2, 3)),
+            #                     np.rot90(bx, 2, axes=(2, 3)), np.rot90(bx, 3, axes=(2, 3))), 0)
+            #bx = torch.FloatTensor(bx)
+            bx = torch.cat(bx, torch.rot90(bx,1, axes=(2,3)),torch.rot90(bx, 2, axes=(2, 3)), torch.rot90(bx, 3, axes=(2, 3)), 0)
             bx, by_prime = bx.cuda(), by_prime.cuda()
 
             _, pen = net(bx * 2 - 1)
@@ -283,11 +284,11 @@ def train(no_correction=True, C_hat_transpose=None, C_hat_transpose2=None, sched
             # KL loss, set to 0 for now
             # KL loss, set to 0 for now, this part just gets ignored? /0 gives no error but also doesn't train
             # Should ask it to state KL loss over time, compare to other parts
-        DML_loss += F.cross_entropy(F.softmax(net.rot_pred(pen), dim = 1), F.softmax(net2.rot_pred(pen2), dim = 1))
+        DML_loss += F.cross_entropy(net.rot_pred(pen), net2.rot_pred(pen2))
         loss += DML_loss 
             
             #kl_loss2 += 0.01*loss_kl(F.log_softmax(net2.rot_pred(pen2),dim = 1), F.softmax(net.rot_pred(pen),dim = 1))
-        DML_loss2 += F.cross_entropy(F.softmax(net2.rot_pred(pen2),dim = 1), F.softmax(net.rot_pred(pen),dim = 1))
+        DML_loss2 += F.cross_entropy(net2.rot_pred(pen2), net.rot_pred(pen))
         loss2 += DML_loss2 
 
         loss3 = loss + loss2
