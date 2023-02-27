@@ -236,65 +236,72 @@ def train(no_correction=True, C_hat_transpose=None, C_hat_transpose2=None, sched
     net2.train() 
     loss_avg = 0.0
     loss_avg2 = 0.0
+    T = torch.tensor(0.2, requires_grad=True)
+
+    scaler = torch.cuda.amp.grad_scaler()
     for bx, by in train_loader:
         bx, by = bx.cuda(), by.cuda()
 
-        #for model in models: (indent stuff below)
-        # forward
-        logits, _ = net(bx * 2 - 1) # change 'net' to 'models'? could also leave it as kind of scrappy code and manually write 'net' and 'nets'
-        logits2, _ = net2(bx * 2 - 1)
-
-        # backward
         optimizer.zero_grad()
         optimizer2.zero_grad()
-        scheduler.step()
-        scheduler2.step()
-        if no_correction:
-            loss = F.cross_entropy(logits, by)
-            loss2 = F.cross_entropy(logits2, by)
-        else:
-            pre1 = C_hat_transpose[torch.cuda.LongTensor(by.data)] 
-            pre2 = torch.mul(F.softmax(logits), pre1) + 1e-6
-            loss = -(torch.log(pre2.sum(1))).mean() 
+        
+        #for model in models: (indent stuff below)
+        # forward
+        with torch.cuda.amp.autocast_mode(device_type = 'cuda', dtype = torch.float16):
+            logits, _ = net(bx * 2 - 1) # change 'net' to 'models'? could also leave it as kind of scrappy code and manually write 'net' and 'nets'
+            logits2, _ = net2(bx * 2 - 1)
 
-            pre12 = C_hat_transpose2[torch.cuda.LongTensor(by.data)]
-            pre22 = torch.mul(F.softmax(logits2), pre12) + 1e-6
-            loss2 = -(torch.log(pre22.sum(1))).mean()
+            # backward
+            scheduler.step()
+            scheduler2.step()
+            if no_correction:
+                loss = F.cross_entropy(logits, by)
+                loss2 = F.cross_entropy(logits2, by)
+            else:
+                pre1 = C_hat_transpose[torch.cuda.LongTensor(by.data)] 
+                pre2 = torch.mul(F.softmax(logits), pre1) + 1e-6
+                loss = -(torch.log(pre2.sum(1))).mean() 
+
+                pre12 = C_hat_transpose2[torch.cuda.LongTensor(by.data)]
+                pre22 = torch.mul(F.softmax(logits2), pre12) + 1e-6
+                loss2 = -(torch.log(pre22.sum(1))).mean()
             
-        if not args.no_ss:
-            curr_batch_size = bx.size(0)
-            by_prime = torch.cat((torch.zeros(bx.size(0)), torch.ones(bx.size(0)),
+            if not args.no_ss:
+                curr_batch_size = bx.size(0)
+                by_prime = torch.cat((torch.zeros(bx.size(0)), torch.ones(bx.size(0)),
                                   2*torch.ones(bx.size(0)), 3*torch.ones(bx.size(0))), 0).long()
             #bx = bx.cpu().numpy()
             #bx = np.concatenate((bx, np.rot90(bx, 1, axes=(2, 3)),
             #                     np.rot90(bx, 2, axes=(2, 3)), np.rot90(bx, 3, axes=(2, 3))), 0)
             #bx = torch.FloatTensor(bx)
-            bx = torch.cat((bx, torch.rot90(bx,1, dims=[2,3]),torch.rot90(bx, 2, dims=[2, 3]), torch.rot90(bx, 3, dims=[2, 3])), 0)
-            bx, by_prime = bx.cuda(), by_prime.cuda()
+                bx = torch.cat((bx, torch.rot90(bx,1, dims=[2,3]),torch.rot90(bx, 2, dims=[2, 3]), torch.rot90(bx, 3, dims=[2, 3])), 0)
+                bx, by_prime = bx.cuda(), by_prime.cuda()
 
-            _, pen = net(bx * 2 - 1)
-            _, pen2 = net2(bx * 2 - 1)
+                _, pen = net(bx * 2 - 1)
+                _, pen2 = net2(bx * 2 - 1)
 
-            loss += 0.5 * F.cross_entropy(net.rot_pred(pen), by_prime)
-            loss2 += 0.5 * F.cross_entropy(net2.rot_pred(pen2), by_prime)
+                loss += 0.5 * F.cross_entropy(net.rot_pred(pen), by_prime)
+                loss2 += 0.5 * F.cross_entropy(net2.rot_pred(pen2), by_prime)
 
 
             # KL loss, set to 0 for now
             # KL loss, set to 0 for now, this part just gets ignored? /0 gives no error but also doesn't train
             # Should ask it to state KL loss over time, compare to other parts
-        DML_loss = F.cross_entropy(net.rot_pred(pen), F.softmax(net2.rot_pred(pen2),dim=1))
-        loss += DML_loss 
+            
+            DML_loss = T*F.cross_entropy(net.rot_pred(pen), F.softmax(net2.rot_pred(pen2),dim=1))
+            loss += DML_loss 
             
             #kl_loss2 += 0.01*loss_kl(F.log_softmax(net2.rot_pred(pen2),dim = 1), F.softmax(net.rot_pred(pen),dim = 1))
-        DML_loss2 += F.cross_entropy(net2.rot_pred(pen2), F.softmax(net.rot_pred(pen),dim=1))
-        loss2 = DML_loss2 
+            DML_loss2 = T*F.cross_entropy(net2.rot_pred(pen2), F.softmax(net.rot_pred(pen),dim=1))
+            loss2 += DML_loss2 
 
-        loss3 = loss + loss2
-        loss3.backward()
+            loss3 = loss + loss2
+            scaler.scale(loss3).backward()
 
-        optimizer.step() # Ignore warning, this is the right order        
-        optimizer2.step() # Ignore warning, this is the right order        
+            scaler.step(optimizer) # Ignore warning, this is the right order        
+            scaler.step(optimizer2) #optimizer2.step() # Ignore warning, this is the right order        
 
+            scaler.update()
         # exponential moving average
         loss_avg = loss_avg * 0.95 + loss.item() * 0.05
         loss_avg2 = loss_avg2 * 0.95 + loss2.item() * 0.05
@@ -316,33 +323,34 @@ def test():
     loss_avg2 = 0.0
     correct2 = 0
 
-    for bx, by in test_loader:
-        bx, by = bx.cuda(), by.cuda()
+    with torch.cuda.amp.autocast_mode(device_type = 'cuda', dtype = torch.float16):
+        for bx, by in test_loader:
+            bx, by = bx.cuda(), by.cuda()
 
         # forward
-        logits, pen = net(bx * 2 - 1) # Does the -1 mean look at the penultimate layer? Or is it just the ','
-        loss = F.cross_entropy(logits, by)
+            logits, pen = net(bx * 2 - 1) # Does the -1 mean look at the penultimate layer? Or is it just the ','
+            loss = F.cross_entropy(logits, by)
 
-        logits2, pen2 = net2(bx * 2 - 1)
-        loss2 = F.cross_entropy(logits2, by)
+            logits2, pen2 = net2(bx * 2 - 1)
+            loss2 = F.cross_entropy(logits2, by)
 
         
         # accuracy
-        pred = logits.data.max(1)[1]
-        correct += pred.eq(by.data).sum().item()
+            pred = logits.data.max(1)[1]
+            correct += pred.eq(by.data).sum().item()
 
-        pred2 = logits2.data.max(1)[1]
-        correct2 += pred2.eq(by.data).sum().item()
+            pred2 = logits2.data.max(1)[1]
+            correct2 += pred2.eq(by.data).sum().item()
 
 
         # test loss average
-        loss_avg += loss.item()
-        loss_avg2 += loss2.item()
+            loss_avg += loss.item()
+            loss_avg2 += loss2.item()
 
-    state['test_loss'] = loss_avg / len(test_loader)
-    state['test_accuracy'] = correct / len(test_loader.dataset)
-    state['test_loss2'] = loss_avg2 / len(test_loader)
-    state['test_accuracy2'] = correct2 / len(test_loader.dataset)
+        state['test_loss'] = loss_avg / len(test_loader)
+        state['test_accuracy'] = correct / len(test_loader.dataset)
+        state['test_loss2'] = loss_avg2 / len(test_loader)
+        state['test_accuracy2'] = correct2 / len(test_loader.dataset)
 
     torch.set_grad_enabled(True)
 
