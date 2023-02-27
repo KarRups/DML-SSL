@@ -233,7 +233,7 @@ def train(no_correction=True, C_hat_transpose=None, C_hat_transpose2=None,T = to
         
         #for model in models: (indent stuff below)
         # forward
-        with torch.autocast(device_type = 'cuda', dtype = torch.float16):
+        with torch.autocast(device_type = 'cuda', dtype = torch.bfloat16):
             logits, _ = net(bx * 2 - 1) # change 'net' to 'models'? could also leave it as kind of scrappy code and manually write 'net' and 'nets'
             logits2, _ = net2(bx * 2 - 1)
 
@@ -266,6 +266,10 @@ def train(no_correction=True, C_hat_transpose=None, C_hat_transpose2=None,T = to
                 _, pen = net(bx * 2 - 1)
                 _, pen2 = net2(bx * 2 - 1)
 
+                pen = pen.cuda()
+                pen2 = pen2.cuda()
+
+
                 loss += 0.5 * F.cross_entropy(net.rot_pred(pen), by_prime)
                 loss2 += 0.5 * F.cross_entropy(net2.rot_pred(pen2), by_prime)
 
@@ -274,11 +278,11 @@ def train(no_correction=True, C_hat_transpose=None, C_hat_transpose2=None,T = to
             # KL loss, set to 0 for now, this part just gets ignored? /0 gives no error but also doesn't train
             # Should ask it to state KL loss over time, compare to other parts
             
-            DML_loss = T*F.cross_entropy(net.rot_pred(pen), F.softmax(net2.rot_pred(pen2),dim=1))
+            DML_loss = T*F.cross_entropy(net.rot_pred(pen), F.softmax(net2.rot_pred(pen2),dim=1)).cuda()
             loss += DML_loss 
             
             #kl_loss2 += 0.01*loss_kl(F.log_softmax(net2.rot_pred(pen2),dim = 1), F.softmax(net.rot_pred(pen),dim = 1))
-            DML_loss2 = T*F.cross_entropy(net2.rot_pred(pen2), F.softmax(net.rot_pred(pen),dim=1))
+            DML_loss2 = T*F.cross_entropy(net2.rot_pred(pen2), F.softmax(net.rot_pred(pen),dim=1)).cuda()
             loss2 += DML_loss2 
 
             loss3 = loss + loss2
@@ -348,7 +352,7 @@ for epoch in range(args.epochs):
     train(scheduler=scheduler)
     print('Epoch', epoch, '| Time Spent:', round(time.time() - begin_epoch, 2))
 
-    if (epoch%5==0):
+    if (epoch%1==0):
         test()
 
     log.write('%s\n' % json.dumps(state))
