@@ -189,11 +189,7 @@ if args.ngpu > 0:
 cudnn.benchmark = True  # fire on all cylinders
 
 optimizer = torch.optim.SGD(
-    net.parameters(), state['learning_rate'], momentum=state['momentum'],
-    weight_decay=state['decay'], nesterov=True)
-
-optimizer2 = torch.optim.SGD(
-    net2.parameters(), state['learning_rate'], momentum=state['momentum'],
+    list(net.parameters()) +list(net2.parameters()), state['learning_rate'], momentum=state['momentum'],
     weight_decay=state['decay'], nesterov=True)
 
 def cosine_annealing(step, total_steps, lr_max, lr_min):
@@ -210,14 +206,6 @@ scheduler = torch.optim.lr_scheduler.LambdaLR(
         1e-6 / args.learning_rate))
 
 # Might need to do scheduler for the second model too?
-scheduler2 = torch.optim.lr_scheduler.LambdaLR(
-    optimizer2,
-    lr_lambda=lambda step: cosine_annealing(
-        step,
-        args.epochs * len(train_loader),
-        1,  # since lr_lambda computes multiplicative factor
-        1e-6 / args.learning_rate))
-
 
 # Need a for loop in the training
 #  for i in range(self.model_num):
@@ -231,29 +219,27 @@ scheduler2 = torch.optim.lr_scheduler.LambdaLR(
 #loss_kl = nn.KLDivLoss(reduction='batchmean')
 # train function (forward, backward, update)
 # This performs a training step, need it to call both models in here
-def train(no_correction=True, C_hat_transpose=None, C_hat_transpose2=None, scheduler=scheduler):
+def train(no_correction=True, C_hat_transpose=None, C_hat_transpose2=None,T = torch.tensor(0.2, requires_grad=True), scheduler=scheduler):
     net.train()     # enter train mode # what does that mean?
     net2.train() 
     loss_avg = 0.0
     loss_avg2 = 0.0
-    T = torch.tensor(0.2, requires_grad=True)
 
-    scaler = torch.cuda.amp.grad_scaler()
+    scaler = torch.cuda.amp.GradScaler()
     for bx, by in train_loader:
         bx, by = bx.cuda(), by.cuda()
 
         optimizer.zero_grad()
-        optimizer2.zero_grad()
         
         #for model in models: (indent stuff below)
         # forward
-        with torch.cuda.amp.autocast_mode(device_type = 'cuda', dtype = torch.float16):
+        with torch.autocast(device_type = 'cuda', dtype = torch.float16):
             logits, _ = net(bx * 2 - 1) # change 'net' to 'models'? could also leave it as kind of scrappy code and manually write 'net' and 'nets'
             logits2, _ = net2(bx * 2 - 1)
 
             # backward
             scheduler.step()
-            scheduler2.step()
+         
             if no_correction:
                 loss = F.cross_entropy(logits, by)
                 loss2 = F.cross_entropy(logits2, by)
@@ -299,8 +285,7 @@ def train(no_correction=True, C_hat_transpose=None, C_hat_transpose2=None, sched
             scaler.scale(loss3).backward()
 
             scaler.step(optimizer) # Ignore warning, this is the right order        
-            scaler.step(optimizer2) #optimizer2.step() # Ignore warning, this is the right order        
-
+            
             scaler.update()
         # exponential moving average
         loss_avg = loss_avg * 0.95 + loss.item() * 0.05
@@ -323,7 +308,7 @@ def test():
     loss_avg2 = 0.0
     correct2 = 0
 
-    with torch.cuda.amp.autocast_mode(device_type = 'cuda', dtype = torch.float16):
+    with torch.autocast(device_type = 'cuda', dtype = torch.float16):
         for bx, by in test_loader:
             bx, by = bx.cuda(), by.cuda()
 
