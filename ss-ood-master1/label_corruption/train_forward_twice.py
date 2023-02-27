@@ -219,7 +219,7 @@ scheduler = torch.optim.lr_scheduler.LambdaLR(
 #loss_kl = nn.KLDivLoss(reduction='batchmean')
 # train function (forward, backward, update)
 # This performs a training step, need it to call both models in here
-def train(no_correction=True, C_hat_transpose=None, C_hat_transpose2=None,T = torch.tensor(0.2, requires_grad=True), scheduler=scheduler):
+def train(no_correction=True, C_hat_transpose=None, C_hat_transpose2=None,T = torch.tensor(0.2, requires_grad=True).cuda(), scheduler=scheduler):
     net.train()     # enter train mode # what does that mean?
     net2.train() 
     loss_avg = 0.0
@@ -233,7 +233,7 @@ def train(no_correction=True, C_hat_transpose=None, C_hat_transpose2=None,T = to
         
         #for model in models: (indent stuff below)
         # forward
-        with torch.autocast(device_type = 'cuda', dtype = torch.bfloat16):
+        with torch.autocast(device_type = 'cuda', dtype = torch.float16):
             logits, _ = net(bx * 2 - 1) # change 'net' to 'models'? could also leave it as kind of scrappy code and manually write 'net' and 'nets'
             logits2, _ = net2(bx * 2 - 1)
 
@@ -261,13 +261,13 @@ def train(no_correction=True, C_hat_transpose=None, C_hat_transpose2=None,T = to
             #                     np.rot90(bx, 2, axes=(2, 3)), np.rot90(bx, 3, axes=(2, 3))), 0)
             #bx = torch.FloatTensor(bx)
                 bx = torch.cat((bx, torch.rot90(bx,1, dims=[2,3]),torch.rot90(bx, 2, dims=[2, 3]), torch.rot90(bx, 3, dims=[2, 3])), 0)
-                bx, by_prime = bx.cuda(), by_prime.cuda()
+                #bx, by_prime = bx.cuda(), by_prime.cuda()
 
                 _, pen = net(bx * 2 - 1)
                 _, pen2 = net2(bx * 2 - 1)
 
-                pen = pen.cuda()
-                pen2 = pen2.cuda()
+                #pen = pen.cuda()
+                #pen2 = pen2.cuda()
 
 
                 loss += 0.5 * F.cross_entropy(net.rot_pred(pen), by_prime)
@@ -278,11 +278,11 @@ def train(no_correction=True, C_hat_transpose=None, C_hat_transpose2=None,T = to
             # KL loss, set to 0 for now, this part just gets ignored? /0 gives no error but also doesn't train
             # Should ask it to state KL loss over time, compare to other parts
             
-            DML_loss = T*F.cross_entropy(net.rot_pred(pen), F.softmax(net2.rot_pred(pen2),dim=1)).cuda()
+            DML_loss = T*F.cross_entropy(net.rot_pred(pen), F.softmax(net2.rot_pred(pen2),dim=1))
             loss += DML_loss 
             
             #kl_loss2 += 0.01*loss_kl(F.log_softmax(net2.rot_pred(pen2),dim = 1), F.softmax(net.rot_pred(pen),dim = 1))
-            DML_loss2 = T*F.cross_entropy(net2.rot_pred(pen2), F.softmax(net.rot_pred(pen),dim=1)).cuda()
+            DML_loss2 = T*F.cross_entropy(net2.rot_pred(pen2), F.softmax(net.rot_pred(pen),dim=1))
             loss2 += DML_loss2 
 
             loss3 = loss + loss2
