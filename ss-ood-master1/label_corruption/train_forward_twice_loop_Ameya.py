@@ -152,6 +152,58 @@ test_loader = torch.utils.data.DataLoader(test_data, batch_size=args.test_bs, sh
 
 
 
+# Create 
+# Think I should be able to swap this straight for Resnet 20, let me check it out
+#net = WideResNet(args.layers, num_classes, args.widen_factor, dropRate=args.droprate)
+net = resnet20()
+net.rot_pred = nn.Linear(64, 4) # change first entry to 64 for resnet20 layer, 128 for wide resnet
+
+net2 = resnet20()
+net2.rot_pred = nn.Linear(64, 4) # change first entry to 64 for resnet20 layer, 128 for wide resnet
+
+start_epoch = 0
+
+# Restore model if desired
+if args.load != '':
+    for i in range(1000 - 1, -1, -1):
+        model_name = os.path.join(args.load, args.dataset + '_' + 'wrn' +
+                                  '_baseline_epoch_' + str(i) + '.pt')
+        if os.path.isfile(model_name):
+            net.load_state_dict(torch.load(model_name))
+            print('Model restored! Epoch:', i)
+            start_epoch = i + 1
+            break
+    if start_epoch == 0:
+        assert False, "could not resume"
+
+if args.ngpu > 1:
+    net = torch.nn.DataParallel(net, device_ids=list(range(args.ngpu)))
+    net2 = torch.nn.DataParallel(net, device_ids=list(range(args.ngpu)))
+
+if args.ngpu > 0:
+    
+    net.cuda()
+    net2.cuda()
+    torch.cuda.manual_seed(1)
+
+cudnn.benchmark = True  # fire on all cylinders
+
+optimizer = torch.optim.SGD(
+    list(net.parameters()) +list(net2.parameters()), state['learning_rate'], momentum=state['momentum'],
+    weight_decay=state['decay'], nesterov=True)
+
+def cosine_annealing(step, total_steps, lr_max, lr_min):
+    return lr_min + (lr_max - lr_min) * 0.5 * (
+            1 + np.cos(step / total_steps * np.pi))
+
+# Might need to do scheduler for the second model too?
+scheduler = torch.optim.lr_scheduler.LambdaLR(
+    optimizer,
+    lr_lambda=lambda step: cosine_annealing(
+        step,
+        args.epochs * len(train_loader),
+        1,  # since lr_lambda computes multiplicative factor
+        1e-6 / args.learning_rate))
 
 
 # Might need to do scheduler for the second model too?
