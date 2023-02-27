@@ -346,8 +346,9 @@ def test():
 
 # Main loop
 n = 10
+performance = np.empty((n, 0)).tolist()
 for j in range(n):
-    test = np.empty((n, 0)).tolist()
+    
     for epoch in range(args.epochs):
         state['epoch'] = epoch
 
@@ -357,13 +358,13 @@ for j in range(n):
 
         if (epoch%1==0):
             test()
-        test[j] = np.append(test[j],state['test_accuracy'])
+        performance[j] = np.append(performance[j],state['test_accuracy'])
         
 
         log.write('%s\n' % json.dumps(state))
         log.flush()
         print(state)
         
-    print(test)
+    print(performance)
 
 log.close()
